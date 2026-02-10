@@ -1,0 +1,852 @@
+
+---
+title: "Simulated Data for EFS"
+format: html
+execute:
+  warning: false
+  message: false
+  echo: false
+---
+```{r}
+library(brms)
+library(rethinking)
+library(tidyverse)
+```
+
+
+```{r}
+# Survival Simulation with Landmark Structure
+# Building on your response rate simulation
+
+# Step 1-5: Reuse your baseline cohort generation (same as before)
+set.seed(123)
+n <- 188
+
+sim_data <- tibble(
+  patient_id = 1:n,
+  age = rnorm(n, mean = 76, sd = 12),
+  sex = sample(c("Male", "Female"), n, replace = TRUE, prob = c(0.76, 0.24))
+)
+
+sim_data <- sim_data |>
+  mutate(
+    immunosupp_type = sample(
+      c("None", "Chronic", "Hematologic", "HIV", "Chronic+Hematologic"),
+      n, replace = TRUE,
+      prob = c(0.83, 0.06, 0.082, 0.005, 0.022)
+    ),
+    immunosuppressed = (immunosupp_type != "None")
+  )
+
+sim_data <- sim_data |>
+  mutate(
+    location = sample(
+      c("Head/Neck", "Conjunctiva", "Genitalia", "Lower Extremity", 
+        "Upper Extremity", "Trunk", "Unknown Primary"),
+      n, replace = TRUE,
+      prob = c(0.86, 0.033, 0.005, 0.016, 0.022, 0.027, 0.033)
+    )
+  )
+
+sim_data <- sim_data |>
+  rowwise() |>
+  mutate(
+    stage = if_else(
+      location == "Conjunctiva",
+      sample(c("II", "III", "Unstaged"), 1, prob = c(0.3, 0.5, 0.2)),
+      sample(c("I", "II", "III", "IV", "Unstaged"), 1, 
+             prob = c(0.005, 0.038, 0.40, 0.45, 0.11))
+    )
+  ) |>
+  ungroup()
+
+sim_data <- sim_data |>
+  mutate(
+    agent = sample(
+      c("Cemiplimab", "Pembrolizumab", "Ipi+Nivo"),
+      n, replace = TRUE,
+      prob = c(0.70, 0.28, 0.02)
+    )
+  )
+
+sim_data <- sim_data |>
+  mutate(
+    ps_score = 
+      scale(age)[,1] * 0.3 +
+      ifelse(immunosuppressed, 0.5, 0) +
+      case_when(
+        stage == "I" ~ -0.5,
+        stage == "II" ~ -0.3,
+        stage == "III" ~ 0,
+        stage == "IV" ~ 0.6,
+        TRUE ~ 0
+      ) + rnorm(n, 0, 0.8),
+    
+    ecog = case_when(
+      ps_score < -0.5 ~ 0,
+      ps_score < 0.5 ~ 1,
+      ps_score < 1.5 ~ 2,
+      TRUE ~ 3
+    )
+  )
+
+# Step 6: Add Year (for surgery era effect)
+sim_data <- sim_data |>
+  mutate(
+    year = sample(2018:2023, n, replace = TRUE)
+  )
+
+# Step 7: Dose Group Assignment FIRST (based only on baseline confounders)
+sim_data <- sim_data |>
+  mutate(
+    dose_3plus_prob = plogis(
+      0.5 +                                      # Baseline
+        -0.5 * (ecog >= 2) +                      # Poor PS → stop early
+        -0.3 * (stage == "IV") +                  # Stage IV → stop early
+        0.3 * (agent == "Cemiplimab") +           # Cemiplimab → more doses
+        0.2 * (year - 2020)                       # Later years → more doses (practice evolution)
+    ),
+    dose_group = if_else(
+      rbinom(n, 1, dose_3plus_prob) == 1,
+      "3+ doses",
+      "2 doses"
+    ),
+    num_doses = if_else(dose_group == "2 doses", 2, 
+                        sample(3:10, n, replace = TRUE, 
+                               prob = c(0.3, 0.25, 0.15, 0.1, 0.08, 0.06, 0.04, 0.02)))
+  )
+```
+
+
+```{r}
+# Step 8: Surgery Assignment AFTER dose (dose → surgery)
+sim_data <- sim_data |>
+  mutate(
+    surgery_prob = plogis(
+      -0.5 +                                      # Baseline
+        -1.0 * (dose_group == "3+ doses") +       # More doses → less surgery
+        -1.0 * (stage == "IV") +                  # Stage IV less likely
+        0.8 * (location == "Head/Neck") +         # H&N more likely
+        -0.15 * (year - 2020)                     # Decreasing over time
+    ),
+    surgery = rbinom(n, 1, surgery_prob)
+  )
+```
+
+
+## Simulate Strong Protective Effect of 3+ Doses
+
+```{r}
+set.seed(123)
+# Step 9: Generate Survival Times (Weibull distribution)
+# Landmark at dose 2: all patients survived to dose 2 (assume ~6 weeks)
+# Now simulate time FROM dose 2 to event
+
+# True hazard ratio for dose effect (THIS IS WHAT WE'LL VARY)
+true_hr_dose <- 0.1
+
+sim_data_strong <- sim_data |>
+  mutate(
+    # Log-hazard (linear predictor for Weibull)
+    log_hazard = 
+      -3.5 +                                      # Baseline log-hazard
+      log(true_hr_dose) * (dose_group == "3+ doses") +  # Now negative (protective)
+      0.02 * (age - 76) +                         # Age effect
+      0.4 * (stage == "IV") +                     # Stage IV worse
+      0.3 * (ecog >= 2) +                         # Poor PS worse
+      0.5 * immunosuppressed +                    # Immunosupp worse
+      -0.4 * surgery,                             # Surgery protective
+    
+    # Convert to Weibull scale parameter
+    lambda = exp(log_hazard),
+    
+    # Weibull shape (>1 = increasing hazard over time)
+    shape = 1.2,
+    
+    # Generate survival time from dose 2 (in months)
+    time_from_dose2 = rweibull(n, shape = shape, scale = 1/lambda),
+    
+    # Generate event indicator (1 = event, 0 = censored)
+    # Administrative censoring at 24 months
+    event = if_else(time_from_dose2 <= 24, 1, 0),
+    
+    # Observed time (capped at 24 months)
+    time_observed = pmin(time_from_dose2, 24)
+  )
+
+# Step 10: Apply condensed categories (for modeling)
+sim_survival_landmark_strong <- sim_data_strong |>
+  mutate(
+    location_condensed = case_when(
+      location == "Head/Neck" ~ "Head/Neck",
+      location == "Conjunctiva" ~ "Conjunctiva",
+      location == "Unknown Primary" ~ "Unknown Primary",
+      TRUE ~ "Other"
+    ),
+    ecog_condensed = if_else(ecog <= 1, "ECOG 0-1", "ECOG 2-3"),
+    stage_condensed = case_when(
+      stage %in% c("I", "II") ~ "Stage I-II",
+      stage == "III" ~ "Stage III",
+      stage == "IV" ~ "Stage IV",
+      stage == "Unstaged" ~ "Unstaged"
+    ),
+    age_centered = age - 76,
+    immunosuppressed = factor(immunosuppressed, levels = c(FALSE, TRUE))
+  )
+
+# Check the data
+table(sim_survival_landmark_strong$dose_group)
+table(sim_survival_landmark_strong$surgery, sim_survival_landmark_strong$dose_group)
+mean(sim_survival_landmark_strong$event)
+summary(sim_survival_landmark_strong$time_observed)
+sim_survival_landmark_strong |>
+  group_by(dose_group) |>
+  summarise(event_rate = mean(event))
+
+```
+
+
+
+```{r}
+# Define priors for landmark survival model
+priors_survival <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 0.5), class = b),
+  prior(gamma(2, 1), class = shape)
+)
+
+# Fit landmark model (adjustment set from DAG)
+fit_landmark_survival_strong <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_strong,
+  family = weibull(),
+  prior = priors_survival,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 456
+)
+
+```
+
+```{r}
+summary(fit_landmark_survival_strong)
+
+```
+
+```{r}
+# Extract posterior draws for dose effect
+posterior_strong <- as_draws_df(fit_landmark_survival_strong) |>
+  mutate(HR = exp(-b_dose_group3Pdoses)) |>  # Note the negative sign
+  pull(HR)
+
+
+# Summary statistics
+mean(posterior_strong)
+quantile(posterior_strong, c(0.025, 0.975))
+```
+
+# Test the null hypothesis
+
+```{r}
+# True hazard ratio for dose effect (THIS IS WHAT WE'LL VARY)
+true_hr_dose <- 1.0
+
+sim_data_null <- sim_data |>
+  mutate(
+    # Log-hazard (linear predictor for Weibull)
+    log_hazard = 
+      -3.5 +                                      # Baseline log-hazard
+      log(true_hr_dose) * (dose_group == "3+ doses") +  # Now negative (protective)
+      0.02 * (age - 76) +                         # Age effect
+      0.4 * (stage == "IV") +                     # Stage IV worse
+      0.3 * (ecog >= 2) +                         # Poor PS worse
+      0.5 * immunosuppressed +                    # Immunosupp worse
+      -0.4 * surgery,                             # Surgery protective
+    
+    # Convert to Weibull scale parameter
+    lambda = exp(log_hazard),
+    
+    # Weibull shape (>1 = increasing hazard over time)
+    shape = 1.2,
+    
+    # Generate survival time from dose 2 (in months)
+    time_from_dose2 = rweibull(n, shape = shape, scale = 1/lambda),
+    
+    # Generate event indicator (1 = event, 0 = censored)
+    # Administrative censoring at 24 months
+    event = if_else(time_from_dose2 <= 24, 1, 0),
+    
+    # Observed time (capped at 24 months)
+    time_observed = pmin(time_from_dose2, 24)
+  )
+
+# Step 10: Apply condensed categories (for modeling)
+sim_survival_landmark_null <- sim_data_null |>
+  mutate(
+    location_condensed = case_when(
+      location == "Head/Neck" ~ "Head/Neck",
+      location == "Conjunctiva" ~ "Conjunctiva",
+      location == "Unknown Primary" ~ "Unknown Primary",
+      TRUE ~ "Other"
+    ),
+    ecog_condensed = if_else(ecog <= 1, "ECOG 0-1", "ECOG 2-3"),
+    stage_condensed = case_when(
+      stage %in% c("I", "II") ~ "Stage I-II",
+      stage == "III" ~ "Stage III",
+      stage == "IV" ~ "Stage IV",
+      stage == "Unstaged" ~ "Unstaged"
+    ),
+    age_centered = age - 76,
+    immunosuppressed = factor(immunosuppressed, levels = c(FALSE, TRUE))
+  )
+
+# Check the data
+table(sim_survival_landmark_null$dose_group)
+table(sim_survival_landmark_null$surgery, sim_survival_landmark_null$dose_group)
+mean(sim_survival_landmark_null$event)
+summary(sim_survival_landmark_null$time_observed)
+sim_survival_landmark_null |>
+  group_by(dose_group) |>
+  summarise(event_rate = mean(event))
+```
+
+```{r}
+# Define priors for landmark survival model
+priors_survival <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 0.5), class = b),
+  prior(gamma(2, 1), class = shape)
+)
+
+# Fit landmark model (adjustment set from DAG)
+fit_landmark_survival_null <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_null,
+  family = weibull(),
+  prior = priors_survival,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 456
+)
+
+```
+
+```{r}
+summary(fit_landmark_survival_null)
+```
+```{r}
+posterior_null <- as_draws_df(fit_landmark_survival_null) |>
+  mutate(HR = exp(-b_dose_group3Pdoses)) |>  # Note the negative sign
+  pull(HR)
+mean(posterior_null)
+quantile(posterior_null, c(0.025, 0.975))
+
+```
+
+```{r}
+# Extract posteriors for both scenarios
+posterior_null <- as_draws_df(fit_landmark_survival_null) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), scenario = "Null (HR = 1.0)") |>
+  select(HR, scenario)
+
+posterior_strong <- as_draws_df(fit_landmark_survival_strong) |>
+ mutate(HR = exp(-b_dose_group3Pdoses), scenario = "Strong (HR = 0.10)") |>
+ select(HR, scenario)
+
+# You'll need to refit with true_hr_dose = 0.33 and extract:
+# Combine and plot
+
+combined <- bind_rows(posterior_null, posterior_strong)
+
+# 
+ggplot(combined, aes(x = HR, fill = scenario)) +
+ geom_density(alpha = 0.6) +
+ geom_vline(xintercept = 1, linetype = "dashed") +
+ labs(x = "Hazard Ratio (3+ doses vs 2 doses)", y = "Density") +
+ theme_minimal()
+
+```
+
+Compare these
+
+```{r}
+# Bayesian Descriptive Statistics for Dose Effect
+
+# Assuming you have both posteriors extracted:
+# posterior_null (from HR = 1.0 simulation)
+# posterior_strong (from HR = 0.33 simulation)
+
+posterior_null <- as_draws_df(fit_landmark_survival_null) |>
+  mutate(HR = exp(-b_dose_group3Pdoses)) |>  # Note the negative sign
+  pull(HR)
+
+posterior_strong <- as_draws_df(fit_landmark_survival_strong) |>
+  mutate(HR = exp(-b_dose_group3Pdoses)) |>  # Note the negative sign
+  pull(HR)
+# ------------------------------------------------------------------------------
+# 1. Point Estimates
+# ------------------------------------------------------------------------------
+
+# Null scenario
+mean(posterior_null)
+median(posterior_null)
+
+# Strong effect scenario
+mean(posterior_strong)
+median(posterior_strong)
+
+# ------------------------------------------------------------------------------
+# 2. Credible Intervals
+# ------------------------------------------------------------------------------
+
+# Null scenario
+quantile(posterior_null, c(0.025, 0.975))
+
+# Strong effect scenario
+quantile(posterior_strong, c(0.025, 0.975))
+
+# ------------------------------------------------------------------------------
+# 3. Probability Statements (The BDA Advantage!)
+# ------------------------------------------------------------------------------
+
+# Null scenario
+mean(posterior_null < 1.0)  # P(protective effect)
+mean(posterior_null < 0.8)  # P(meaningful benefit, >20% reduction)
+mean(posterior_null > 1.25) # P(meaningful harm, >25% increase)
+
+# Strong effect scenario
+mean(posterior_strong < 1.0)  # P(protective effect)
+mean(posterior_strong < 0.8)  # P(meaningful benefit)
+mean(posterior_strong < 0.5)  # P(strong benefit, >50% reduction)
+
+# ------------------------------------------------------------------------------
+# 4. Posterior Overlap (How much uncertainty overlap?)
+# ------------------------------------------------------------------------------
+
+# Proportion of null posterior that overlaps with strong posterior's 95% CrI
+strong_ci <- quantile(posterior_strong, c(0.025, 0.975))
+mean(posterior_null > strong_ci[1] & posterior_null < strong_ci[2])
+
+# ------------------------------------------------------------------------------
+# 5. Summary Table
+# ------------------------------------------------------------------------------
+
+summary_table <- tibble(
+  Scenario = c("Null (HR = 1.0)", "Strong (HR = 0.33)"),
+  Mean_HR = c(mean(posterior_null), mean(posterior_strong)),
+  Median_HR = c(median(posterior_null), median(posterior_strong)),
+  CI_Lower = c(quantile(posterior_null, 0.025), quantile(posterior_strong, 0.025)),
+  CI_Upper = c(quantile(posterior_null, 0.975), quantile(posterior_strong, 0.975)),
+  P_Protective = c(mean(posterior_null < 1.0), mean(posterior_strong < 1.0)),
+  P_Meaningful = c(mean(posterior_null < 0.8), mean(posterior_strong < 0.8))
+)
+
+summary_table
+
+```
+
+
+
+
+#### Varying priors
+
+
+# Prior Selection
+
+Proposed EFS prior sets (for the dose coefficient):
+
+Tightly skeptical: normal(0, 0.15) — strong prior belief in minimal effect  
+Moderately skeptical: normal(0, 0.25) — your honest clinical prior  
+Diffuse/data-driven: normal(0, 0.5) — allows data to dominate  
+
+```{r}
+#| label: priors-for-efs
+
+
+
+# ==============================================================================
+# EFS PRIOR DEFINITIONS
+# ==============================================================================
+
+# TIGHT (Tightly Skeptical): normal(0, 0.15)
+# - Strong prior belief that dose effect is minimal (near null)
+# - 95% of prior mass spans HR ~0.75 to 1.35
+# - Use case: When you have strong clinical conviction of no meaningful effect
+
+# MODERATE (Moderately Skeptical): normal(0, 0.25)
+# - Your honest clinical prior: skeptical but open to modest effects
+# - 95% of prior mass spans HR ~0.6 to 1.6
+# - Use case: Reflects genuine clinical equipoise about dose-EFS relationship
+
+# DIFFUSE (Data-Driven): normal(0, 0.5)
+# - Wide prior that allows data to dominate
+# - 95% of prior mass spans HR ~0.4 to 2.5
+# - Use case: Lets the data speak with minimal prior influence
+
+# Note: All priors are centered at 0 (null effect) because our substantive
+# clinical belief for EFS is that additional doses are unlikely to produce
+# large differences, unlike ORR where we expected dose-response effects.
+
+
+
+# Tightly skeptical: strong prior belief in minimal dose effect
+priors_efs_tight <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 0.15), class = b, coef = dose_group3Pdoses),  # Tight around null
+  prior(normal(0, 0.3), class = b),  # Other covariates
+  prior(gamma(2, 1), class = shape)
+)
+
+# Moderately skeptical: your honest clinical prior
+priors_efs_moderate <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 0.25), class = b, coef = dose_group3Pdoses),  # Moderate skepticism
+  prior(normal(0, 0.3), class = b),
+  prior(gamma(2, 1), class = shape)
+)
+
+# Diffuse: let data dominate
+priors_efs_diffuse <- c(
+  prior(normal(0, 1), class = Intercept),
+  prior(normal(0, 0.5), class = b, coef = dose_group3Pdoses),  # Wide, data-driven
+  prior(normal(0, 0.3), class = b),
+  prior(gamma(2, 1), class = shape)
+)
+
+```
+
+
+```{r}
+# ==============================================================================
+# STRONG EFFECT SCENARIO (true HR = 0.10)
+# ==============================================================================
+
+# Tightly skeptical prior
+fit_strong_tight <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_strong,
+  family = weibull(),
+  prior = priors_efs_tight,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 456
+)
+
+# Moderately skeptical prior
+fit_strong_moderate <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_strong,
+  family = weibull(),
+  prior = priors_efs_moderate,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 457
+)
+
+# Diffuse prior
+fit_strong_diffuse <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_strong,
+  family = weibull(),
+  prior = priors_efs_diffuse,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 458
+)
+
+# Extract posteriors
+posterior_strong_tight <- as_draws_df(fit_strong_tight) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Tight", Scenario = "Strong")
+
+posterior_strong_moderate <- as_draws_df(fit_strong_moderate) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Moderate", Scenario = "Strong")
+
+posterior_strong_diffuse <- as_draws_df(fit_strong_diffuse) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Diffuse", Scenario = "Strong")
+
+# Summaries
+summary_strong_tight <- tibble(
+  Scenario = "Strong (HR = 0.10)",
+  Prior = "Tight",
+  Mean_HR = mean(posterior_strong_tight$HR),
+  Median_HR = median(posterior_strong_tight$HR),
+  CI_Lower = quantile(posterior_strong_tight$HR, 0.025),
+  CI_Upper = quantile(posterior_strong_tight$HR, 0.975),
+  P_Protective = mean(posterior_strong_tight$HR < 1.0),
+  P_Meaningful = mean(posterior_strong_tight$HR < 0.8)
+)
+
+summary_strong_moderate <- tibble(
+  Scenario = "Strong (HR = 0.10)",
+  Prior = "Moderate",
+  Mean_HR = mean(posterior_strong_moderate$HR),
+  Median_HR = median(posterior_strong_moderate$HR),
+  CI_Lower = quantile(posterior_strong_moderate$HR, 0.025),
+  CI_Upper = quantile(posterior_strong_moderate$HR, 0.975),
+  P_Protective = mean(posterior_strong_moderate$HR < 1.0),
+  P_Meaningful = mean(posterior_strong_moderate$HR < 0.8)
+)
+
+summary_strong_diffuse <- tibble(
+  Scenario = "Strong (HR = 0.10)",
+  Prior = "Diffuse",
+  Mean_HR = mean(posterior_strong_diffuse$HR),
+  Median_HR = median(posterior_strong_diffuse$HR),
+  CI_Lower = quantile(posterior_strong_diffuse$HR, 0.025),
+  CI_Upper = quantile(posterior_strong_diffuse$HR, 0.975),
+  P_Protective = mean(posterior_strong_diffuse$HR < 1.0),
+  P_Meaningful = mean(posterior_strong_diffuse$HR < 0.8)
+)
+
+```
+
+
+```{r}
+# ==============================================================================
+# NULL SCENARIO (true HR = 1.0)
+# ==============================================================================
+
+# Tightly skeptical prior
+fit_null_tight <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_null,
+  family = weibull(),
+  prior = priors_efs_tight,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 459
+)
+
+# Moderately skeptical prior
+fit_null_moderate <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_null,
+  family = weibull(),
+  prior = priors_efs_moderate,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 460
+)
+
+# Diffuse prior
+fit_null_diffuse <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_null,
+  family = weibull(),
+  prior = priors_efs_diffuse,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 461
+)
+
+# Extract posteriors
+posterior_null_tight <- as_draws_df(fit_null_tight) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Tight", Scenario = "Null")
+
+posterior_null_moderate <- as_draws_df(fit_null_moderate) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Moderate", Scenario = "Null")
+
+posterior_null_diffuse <- as_draws_df(fit_null_diffuse) |>
+  mutate(HR = exp(-b_dose_group3Pdoses), Prior = "Diffuse", Scenario = "Null")
+
+# Summaries
+summary_null_tight <- tibble(
+  Scenario = "Null (HR = 1.0)",
+  Prior = "Tight",
+  Mean_HR = mean(posterior_null_tight$HR),
+  Median_HR = median(posterior_null_tight$HR),
+  CI_Lower = quantile(posterior_null_tight$HR, 0.025),
+  CI_Upper = quantile(posterior_null_tight$HR, 0.975),
+  P_Protective = mean(posterior_null_tight$HR < 1.0),
+  P_Meaningful = mean(posterior_null_tight$HR < 0.8)
+)
+
+summary_null_moderate <- tibble(
+  Scenario = "Null (HR = 1.0)",
+  Prior = "Moderate",
+  Mean_HR = mean(posterior_null_moderate$HR),
+  Median_HR = median(posterior_null_moderate$HR),
+  CI_Lower = quantile(posterior_null_moderate$HR, 0.025),
+  CI_Upper = quantile(posterior_null_moderate$HR, 0.975),
+  P_Protective = mean(posterior_null_moderate$HR < 1.0),
+  P_Meaningful = mean(posterior_null_moderate$HR < 0.8)
+)
+
+summary_null_diffuse <- tibble(
+  Scenario = "Null (HR = 1.0)",
+  Prior = "Diffuse",
+  Mean_HR = mean(posterior_null_diffuse$HR),
+  Median_HR = median(posterior_null_diffuse$HR),
+  CI_Lower = quantile(posterior_null_diffuse$HR, 0.025),
+  CI_Upper = quantile(posterior_null_diffuse$HR, 0.975),
+  P_Protective = mean(posterior_null_diffuse$HR < 1.0),
+  P_Meaningful = mean(posterior_null_diffuse$HR < 0.8)
+)
+
+```
+
+
+```{r}
+# ==============================================================================
+# COMBINED SUMMARY AND VISUALIZATION
+# ==============================================================================
+
+# Combine all summaries
+summary_all_priors <- bind_rows(
+  summary_strong_tight, summary_strong_moderate, summary_strong_diffuse,
+  summary_null_tight, summary_null_moderate, summary_null_diffuse
+)
+
+print(summary_all_priors)
+
+# Combine all posteriors
+posterior_all <- bind_rows(
+  posterior_strong_tight, posterior_strong_moderate, posterior_strong_diffuse,
+  posterior_null_tight, posterior_null_moderate, posterior_null_diffuse
+) |>
+  select(HR, Prior, Scenario)
+
+# Density plot: faceted by scenario
+ggplot(posterior_all, aes(x = HR, fill = Prior)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "black") +
+  facet_wrap(~Scenario, scales = "free") +
+  labs(
+    x = "Hazard Ratio (3+ doses vs 2 doses)",
+    y = "Posterior Density",
+    title = "EFS Prior Sensitivity Analysis",
+    subtitle = "Comparing three priors under strong effect vs null scenarios"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "bold"),
+  )
+
+# Forest plot
+ggplot(summary_all_priors, aes(y = interaction(Prior, Scenario), x = Mean_HR, color = Prior)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = CI_Lower, xmax = CI_Upper), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  labs(
+    x = "Hazard Ratio (95% CrI)",
+    y = "Prior × Scenario",
+    title = "EFS Dose Effect: Prior Sensitivity Across Scenarios"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "bold"),
+  )
+
+```
+
+```{r}
+sim_survival_landmark_null |>
+  group_by(dose_group) |>
+  summarise(
+    mean_age = mean(age),
+    prop_stage_IV = mean(stage == "IV"),
+    prop_ecog_2plus = mean(ecog >= 2),
+    prop_immunosupp = mean(immunosuppressed),
+    prop_surgery = mean(surgery)
+  )
+
+```
+
+```{r}
+# ==============================================================================
+# SENSITIVITY ANALYSIS: Adjusting for Surgery (Mediator)
+# ==============================================================================
+# NOTE: This model adjusts for surgery, which blocks the causal pathway
+# DoseGroup → Surgery → EFS. This estimates the DIRECT effect of dose
+# (independent of surgery decisions), NOT the total effect.
+# 
+# Use case: Quantify how much of the apparent dose effect is confounded
+# by differential surgery rates between groups.
+# 
+# Interpretation: If HR moves toward 1.0 after adjusting for surgery,
+# it suggests the unadjusted dose effect was partly due to surgery confounding.
+# ==============================================================================
+
+fit_null_surgery_sensitivity <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + surgery +  # <-- KEY DIFFERENCE: surgery now included
+    age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_null,
+  family = weibull(),
+  prior = priors_efs_moderate,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 462
+)
+
+posterior_surgery_adjusted <- as_draws_df(fit_null_surgery_sensitivity) |>
+  mutate(HR = exp(-b_dose_group3Pdoses))
+
+mean(posterior_surgery_adjusted$HR)
+quantile(posterior_surgery_adjusted$HR, c(0.025, 0.975))
+
+```
+```{r}
+fit_strong_surgery_sensitivity <- brm(
+  time_observed | cens(1 - event) ~ 
+    dose_group + surgery +  # Adjusting for surgery (blocks mediation pathway)
+    age_centered + agent + ecog_condensed + 
+    immunosuppressed + stage_condensed,
+  data = sim_survival_landmark_strong,
+  family = weibull(),
+  prior = priors_efs_moderate,
+  chains = 4,
+  iter = 2000,
+  warmup = 1000,
+  cores = 4,
+  seed = 463
+)
+
+posterior_strong_surgery <- as_draws_df(fit_strong_surgery_sensitivity) |>
+  mutate(HR = exp(-b_dose_group3Pdoses))
+
+mean(posterior_strong_surgery$HR)
+quantile(posterior_strong_surgery$HR, c(0.025, 0.975))
+
+```
+
+
