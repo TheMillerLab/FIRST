@@ -1,0 +1,666 @@
+---
+title: "DAG for EFS"
+format: 
+  html:
+    message: false
+    warning: false
+    echo: false
+    
+---
+ 
+```{r }
+#| warning: false
+#| eval: true
+#| label: load_packages
+source(here::here("scripts/load_packages.R"))
+
+```
+## Key DAG Features
+
+1. Dose(t) = Time-Varying Cumulative Dose
+
+At each time point t, patient has received n doses
+We model: "Given n doses so far, what's the hazard of an event?"
+This avoids immortal time bias because we only count doses already received
+
+2. Surgery as Mediator
+
+Pathway: Dose(t) → Response → Surgery → EFS
+Total effect: Dose → EFS (including via surgery)
+Direct effect: Dose → EFS (not via surgery)
+Adjustment:
+
+For total effect: Adjust for baseline confounders only (Age, Stage, ECOG, etc.)
+For direct effect: Also adjust for Surgery (but this opens a can of worms—see below)
+
+3. Competing Events
+
+Progression and Toxicity are competing risks
+They affect both dose continuation and survival
+May need competing risks models (more complex)
+
+
+## Critical Decision: Total vs Direct Effect
+
+Total Effect (Recommended for Primary Analysis):
+
+"Does receiving more doses improve EFS, through any pathway (including via enabling surgery)?"
+
+Adjust for: Age, Sex, Immune Status, Location, Stage, Agent, ECOG, Year
+Do NOT adjust for Surgery (it's a mediator)
+Interpretation: "Effect of dose count on EFS, including the benefit of dose → response → surgery"
+Direct Effect (Secondary/Sensitivity Analysis):
+
+"Does dose improve EFS independent of surgery?"
+
+Adjust for: Baseline confounders + Surgery
+
+Problem: Surgery is post-treatment, so conditioning on it may induce bias (collider stratification)
+
+```{r}
+library(dagitty)
+library(ggdag)
+library(stringr)
+library(dplyr)
+library(ggraph)
+
+dag_survival <- dagitty('dag {
+  
+  "Dose(t)" [exposure]
+  "EFS" [outcome]
+  
+  
+  Location -> Stage
+  Location -> "Dose(t)"
+  Location -> EFS
+  
+  Age -> "Dose(t)"
+  Age -> EFS
+  Age -> ECOG
+  
+  Sex -> EFS
+  
+  "Immune Status" -> Stage
+  "Immune Status" -> Agent
+  "Immune Status" -> "Dose(t)"
+  "Immune Status" -> EFS
+  "Immune Status" -> ECOG
+  
+  Stage -> Agent
+  Stage -> "Dose(t)"
+  Stage -> EFS
+  Stage -> ECOG
+  
+  Agent -> "Dose(t)"
+  Agent -> EFS
+  
+  ECOG -> "Dose(t)"
+  ECOG -> EFS
+  
+  Year -> "Dose(t)"
+  Year -> Surgery
+  
+  
+  "Dose(t)" -> Response
+  Response -> Surgery
+  Surgery -> EFS
+  
+  
+  "Dose(t)" -> EFS
+  
+  
+  "Dose(t)" -> Progression
+  "Dose(t)" -> Toxicity
+  Progression -> EFS
+  Toxicity -> EFS
+}')
+
+```
+
+
+```{r}
+# Adjustment set for total effect (Dose → EFS, including via Surgery)
+adjustmentSets(dag_survival, exposure = "Dose(t)", outcome = "EFS")
+
+# Adjustment set for direct effect (Dose → EFS, not via Surgery)
+adjustmentSets(dag_survival, exposure = "Dose(t)", outcome = "EFS", 
+               type = "all")
+```
+
+
+```{r}
+# Visualize
+dag_tidy <- dag_survival |>
+  tidy_dagitty(layout = "circle") |>
+  mutate(
+    label = str_wrap(name, width = 8),
+    node_type = case_when(
+      name == "Dose(t)" ~ "exposure",
+      name == "EFS" ~ "outcome",
+      name %in% c("Response", "Surgery") ~ "mediator",
+      name %in% c("Progression", "Toxicity") ~ "competing",
+      TRUE ~ "confounder"
+    ),
+    edge_type = case_when(
+      name == "Dose(t)" & to == "EFS" ~ "causal",
+      name == "EFS" & to == "Dose(t)" ~ "immortal_time",
+      TRUE ~ "other")
+  )
+
+dag_dose_efs <- 
+  ggdag(dag_tidy, text = FALSE, node_size = 0) +
+  geom_dag_edges(
+    aes(edge_colour = edge_type, edge_width = edge_type),
+    arrow_directed = arrow(length = unit(10, "pt"), type = "closed")) +
+  geom_dag_label(aes(label = label, fill = node_type), size = 3.5) +
+  scale_edge_colour_manual(
+    name = "Edge Type",
+    values = c(immortal_time = "red", causal = "blue", other = "gray50")) +
+  scale_edge_width_manual(
+    name = "Edge Type",
+    values = c(immortal_time = 1.5, causal = 1.5, other = 0.8)) +
+  scale_fill_manual(
+    name = "Node Type",
+    values = c(
+      exposure = "lightblue",
+      mediator = "yellow",
+      outcome = "salmon",
+      confounder = "lightgray"
+    )) +
+  theme_dag() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical"  # Stack legends vertically
+  )
+
+dag_dose_efs
+
+```
+
+
+---
+
+## Cohort Structure (Summary)
+
+1. **No pre-immunotherapy surgery** (0%)
+2. **~50% get post-immunotherapy surgery** (response-driven + era effect)
+3. **Dose stopping reasons are documented:**
+   - Progression (competing event)
+   - Planned (e.g., 2 doses → surgery)
+   - Response (complete response → stop)
+   - Toxicity (treatment discontinuation)
+4. **Causal question:** Does cumulative dose count affect event-free survival?
+
+---
+
+
+
+## Your Causal Question: Does Dose Count Affect EFS?
+
+This is asking about **cumulative dose**, not baseline plan. The challenge is that cumulative dose is:
+
+1. **Caused by survival** (must survive to accumulate doses)
+
+2. **Causal for survival** (if treatment works, more doses → better outcomes)
+
+This is a **feedback loop**, which standard regression cannot handle.
+
+---
+
+
+
+
+```{r}
+#| eval: false
+dag_survival_cscc <- dagitty('dag {
+
+Outcomes and exposures
+"Event-Free Survival" [outcome] "Cumulative Dose" [exposure]
+
+Baseline confounders
+Location -> Stage Location -> "Cumulative Dose" Location -> Surgery Location -> "Event-Free Survival"
+
+Age -> "Cumulative Dose" Age -> "Event-Free Survival" Age -> "Performance Status"
+
+Sex -> "Event-Free Survival"
+
+"Immune Status" -> Stage "Immune Status" -> Agent "Immune Status" -> "Cumulative Dose" "Immune Status" -> "Event-Free Survival" "Immune Status" -> "Performance Status"
+
+Stage -> Agent Stage -> "Cumulative Dose" Stage -> Surgery Stage -> "Event-Free Survival" Stage -> "Performance Status"
+
+Agent -> "Cumulative Dose" Agent -> "Event-Free Survival"
+
+"Performance Status" -> "Cumulative Dose" "Performance Status" -> "Event-Free Survival"
+
+Year -> "Cumulative Dose" Year -> Surgery
+
+Time-varying relationships (THE CRITICAL PART)
+"Event-Free Survival" -> "Cumulative Dose" # IMMORTAL TIME "Cumulative Dose" -> "Event-Free Survival" # CAUSAL EFFECT
+
+Surgery as mediator (response-driven)
+"Cumulative Dose" -> Surgery Surgery -> "Event-Free Survival" }')
+```
+
+This DAG has a CYCLE: EFS → Dose → EFS
+
+This means standard adjustment sets don't work!
+
+
+**Key feature:** 
+
+The `"Event-Free Survival" -> "Cumulative Dose"` edge represents immortal time bias. 
+
+This creates a **cycle** in the DAG, which means:
+
+- Standard regression will give biased estimates
+
+- Need specialized methods (landmark, time-varying, or IPW)
+
+---
+
+## Proposed Analysis Plan
+
+### Step 1: Descriptive Analysis (No Causal Claims)
+
+**Goal:** Describe the dose-survival relationship *without* claiming causality.
+
+**Approach:**
+
+- Kaplan-Meier curves stratified by dose group (1-2, 3-4, 5+)
+- **Label clearly:** "Patients who received X doses" (not "effect of X doses")
+- Acknowledge immortal time bias in interpretation
+
+**Why start here:**
+
+- Shows the pattern in your data
+- Motivates the causal analysis
+- Easy to communicate to clinical audience
+
+### Step 2: Landmark Analysis at Dose 2 (Primary Causal Analysis)
+
+**Goal:** Estimate effect of receiving 3+ doses vs stopping at 2, among patients who survived to dose 2.
+
+**Approach:**
+
+Restrict to patients who received ≥2 doses
+```{r}
+#| eval: false
+landmark_data <- 
+  cohort |> filter(num_doses >= 2) |> 
+  mutate( # Recalculate survival time from dose 2 landmark 
+    time_from_landmark = survival_time - time_to_dose_2, 
+    event_from_landmark = event, # Same event indicator 
+    dose_group = if_else(num_doses == 2, "2 doses", "3+ doses") 
+    )
+```
+
+
+```{r}
+#| eval: false
+
+# Fit survival model
+fit_landmark <- brm( 
+  time_from_landmark | cens(1 - event_from_landmark) ~ dose_group + age_centered + immunosuppressed + location_condensed + stage_condensed + agent + ecog_condensed, 
+  data = landmark_data, 
+  family = weibull(), 
+  prior = ..., 
+  chains = 4 )
+
+```
+
+
+
+**Interpretation:** Among patients who survived to receive 2 doses, those who went on to receive 3+ doses had [HR] times the hazard of events compared to those who stopped at 2.
+
+**Adjustment set:** Same as your response DAG (baseline confounders only).
+
+### Step 3: Sensitivity Analysis with Multiple Landmarks
+
+**Goal:** Test robustness across different landmark choices.
+
+**Approach:**
+- Landmark at dose 1 (compare 1 vs 2+ doses)
+- Landmark at dose 2 (compare 2 vs 3+ doses)
+- Landmark at dose 4 (compare 4 vs 5+ doses)
+
+**Interpretation:** If results are consistent across landmarks, strengthens causal inference.
+
+### Step 4: Mediation Analysis (Surgery as Mediator)
+
+**Goal:** Decompose dose effect into:
+- Direct effect (Dose → EFS, not through surgery)
+- Indirect effect (Dose → Surgery → EFS)
+
+**Approach:**
+- Total effect: Dose → EFS (adjust for baseline confounders)
+- Direct effect: Dose → EFS (adjust for baseline confounders + surgery)
+- Indirect effect: Total - Direct
+
+**Caution:** Surgery is post-treatment, so it's a mediator. Adjusting for it estimates the direct effect, not the total effect.
+
+---
+
+## What We Should Simulate
+
+To validate these approaches, let's simulate data with:
+
+1. **Baseline confounders** (Age, Stage, ECOG, etc.) → affect dose accumulation and survival
+2. **Time-varying dose** that accumulates over follow-up
+3. **Immortal time structure** (must survive to receive more doses)
+4. **Dose stopping rules** (progression, planned, response, toxicity)
+5. **Surgery as mediator** (response-driven, era effect)
+6. **True dose effect** on survival (so we can test if models recover it)
+
+**Then we fit:**
+
+- Naive model (ignores immortal time) → should give biased estimates
+- Landmark model → should recover true effect
+- Time-varying model (if feasible) → should also recover true effect
+
+---
+
+
+## Updated DAG for stratified analysis
+
+
+```{r}
+dag_survival_surgery <- dagitty('dag {
+  Age [pos="0,3"]
+  Stage [pos="1,3"]
+  ECOG [pos="2,3"]
+  ImmuneStatus [pos="0,4"]
+  Location [pos="1,4"]
+  Agent [pos="2,4"]
+  Year [pos="3,4"]
+  Sex [pos="3,3"]
+  
+  DoseGroup [exposure,pos="1,2"]
+  Surgery [pos="2,2"]
+  EventFreeSurvival [outcome,pos="2,1"]
+  
+  Age -> DoseGroup
+  Age -> ECOG
+  Age -> EventFreeSurvival
+  
+  Stage -> DoseGroup
+  Stage -> Surgery
+  Stage -> EventFreeSurvival
+  
+  ECOG -> DoseGroup
+  ECOG -> EventFreeSurvival
+  
+  ImmuneStatus -> Stage
+  ImmuneStatus -> DoseGroup
+  ImmuneStatus -> EventFreeSurvival
+  
+  Location -> Stage
+  Location -> Surgery
+  
+  Agent -> DoseGroup
+  Agent -> EventFreeSurvival
+  
+  Year -> Surgery
+  
+  Sex -> EventFreeSurvival
+  
+  DoseGroup -> Surgery
+  Surgery -> EventFreeSurvival
+  
+  EventFreeSurvival -> DoseGroup
+}')
+
+```
+
+The `pos="x,y"` syntax controls where each node appears in the DAG visualization.
+
+**Format:** `pos="horizontal,vertical"`
+
+**Your layout:**
+
+- **Bottom row (y=1):** EventFreeSurvival (the outcome)
+- **Middle row (y=2):** DoseGroup and Surgery (exposure and mediator)
+- **Top rows (y=3,4):** Baseline confounders (Age, Stage, ECOG, etc.)
+
+**Horizontal spacing (x values):**
+
+- Spreads nodes left-to-right to avoid overlap
+- Example: Age at x=0, Stage at x=1, ECOG at x=2
+
+**Special tags:**
+- `[exposure]` highlights DoseGroup as the main exposure
+- `[outcome]` highlights EventFreeSurvival as the outcome
+
+This creates a visual flow: confounders → exposure → outcome.
+
+
+```{r}
+dag_tidy <- dag_survival_surgery |>
+  tidy_dagitty() |>
+  mutate(
+    label = str_wrap(name, width = 8),
+    node_type = case_when(
+      name == "DoseGroup" ~ "exposure",
+      name == "EventFreeSurvival" ~ "outcome",
+      name == "Surgery" ~ "mediator",
+      TRUE ~ "confounder"
+    ),
+    edge_type = case_when(
+      name == "DoseGroup" & to == "EventFreeSurvival" ~ "causal",
+      name == "EventFreeSurvival" & to == "DoseGroup" ~ "immortal_time",
+      TRUE ~ "other"
+    )
+  )
+
+dag_dose_efs <- 
+  ggdag(dag_tidy, text = FALSE, node_size = 0) +
+  geom_dag_edges(
+    aes(edge_colour = edge_type, edge_width = edge_type),
+    arrow_directed = arrow(length = unit(10, "pt"), type = "closed")
+  ) +
+  geom_dag_label(aes(label = label, fill = node_type), size = 3.5) +
+  scale_edge_colour_manual(
+    name = "Edge Type",
+    values = c(immortal_time = "red", causal = "blue", other = "gray50")
+  ) +
+  scale_edge_width_manual(
+    name = "Edge Type",
+    values = c(immortal_time = 1.5, causal = 1.5, other = 0.8)
+  ) +
+  scale_fill_manual(
+    name = "Node Type",
+    values = c(
+      exposure = "lightblue",
+      mediator = "yellow",
+      outcome = "salmon",
+      confounder = "lightgray"
+    )
+  ) +
+  theme_dag() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical"
+  )
+
+save_files(
+  save_object = dag_dose_efs,
+  filename = "dag_dose_efs",
+  directory = here::here(),
+  subD = "files/Directed Acyclic Graphs/DAG Dose EFS"
+)
+
+```
+
+```{r}
+#| label: dag_dose_efs
+#| message: false 
+#| warning: false
+#| fig.height: 7
+#| fig.width: 7
+#| fig-cap:  >
+#|  **Figure 1. Directed Acyclic Graph for Dose-Survival Analysis with Surgery as Mediator**
+#|  This DAG represents the causal structure relating immunotherapy dose intensity to event-free survival in high-risk cutaneous squamous cell carcinoma. Baseline confounders (gray nodes) include patient characteristics (Age, Sex, Immune Status, Performance Status), disease factors (Stage, Location), and treatment factors (Agent, Year). DoseGroup (blue, exposure) represents the comparison of 1-2 doses versus 3+ doses. Surgery (yellow, mediator) caps dose accumulation and affects survival through response-driven pathways. EventFreeSurvival (salmon, outcome) is time to recurrence, progression, or death. The red edge (EventFreeSurvival → DoseGroup) represents immortal time bias: patients must survive to accumulate more doses. The blue edge (DoseGroup → EventFreeSurvival) represents the causal effect of interest. Gray edges show confounding pathways requiring adjustment. To estimate the total effect of DoseGroup on EventFreeSurvival, we adjust for baseline confounders but not Surgery (a post-treatment mediator). Landmark analysis at dose 2 addresses immortal time bias by restricting to patients who survived to receive ≥2 doses.
+ 
+dag_dose_efs
+
+```
+
+
+```{r}
+paths(dag_survival_surgery, 
+      from = "DoseGroup", 
+      to = "EventFreeSurvival")
+
+```
+
+```{r}
+#| label: dag_survival_surgery_adjustmentSet
+
+adjustmentSets(dag_survival_surgery, 
+               exposure = "DoseGroup", 
+               outcome = "EventFreeSurvival")
+
+
+
+```
+
+
+Key findings:
+
+Path #11: DoseGroup <- EventFreeSurvival
+
+This is the immortal time bias (open path, no way to block it)
+Standard adjustment cannot fix this
+Open paths (#1, 6-13, 16-19): These are confounding paths that need blocking
+
+The cycle prevents standard adjustment. This confirms you need:
+
+Landmark analysis (breaks the time dependency), OR
+Time-varying covariates (models the feedback explicitly)
+For landmark analysis, the DAG changes: you condition on "survived to dose 2", which removes the EventFreeSurvival → DoseGroup edge for that subset.
+
+
+
+```{r}
+dag_landmark <- dagitty('dag {
+  Age [pos="0,3"]
+  Stage [pos="1,3"]
+  ECOG [pos="2,3"]
+  ImmuneStatus [pos="0,4"]
+  Location [pos="1,4"]
+  Agent [pos="2,4"]
+  Year [pos="3,4"]
+  Sex [pos="3,3"]
+  
+  DoseGroup [exposure,pos="1,2"]
+  Surgery [pos="2,2"]
+  EventFreeSurvival [outcome,pos="2,1"]
+  
+  Age -> DoseGroup
+  Age -> ECOG
+  Age -> EventFreeSurvival
+  
+  Stage -> DoseGroup
+  Stage -> Surgery
+  Stage -> EventFreeSurvival
+  
+  ECOG -> DoseGroup
+  ECOG -> EventFreeSurvival
+  
+  ImmuneStatus -> Stage
+  ImmuneStatus -> DoseGroup
+  ImmuneStatus -> EventFreeSurvival
+  
+  Location -> Stage
+  Location -> Surgery
+  
+  Agent -> DoseGroup
+  Agent -> EventFreeSurvival
+  
+  Year -> Surgery
+  
+  Sex -> EventFreeSurvival
+  
+  DoseGroup -> Surgery
+  Surgery -> EventFreeSurvival
+}')
+
+adjustmentSets(dag_landmark, 
+               exposure = "DoseGroup", 
+               outcome = "EventFreeSurvival")
+
+```
+EFS_from_dose2 ~ DoseGroup + Age + Agent + ECOG + ImmuneStatus + Stage
+
+    
+    
+```{r}
+dag_tidy_landmark <- dag_landmark |>
+  tidy_dagitty() |>
+  mutate(
+    label = str_wrap(name, width = 8),
+    node_type = case_when(
+      name == "DoseGroup" ~ "exposure",
+      name == "EventFreeSurvival" ~ "outcome",
+      name == "Surgery" ~ "mediator",
+      TRUE ~ "confounder"
+    ),
+    edge_type = case_when(
+      name == "DoseGroup" & to == "EventFreeSurvival" ~ "causal",
+      TRUE ~ "other"
+    )
+  )
+
+dag_landmark_plot <- 
+  ggdag(dag_tidy_landmark, text = FALSE, node_size = 0) +
+  geom_dag_edges(
+    aes(edge_colour = edge_type, edge_width = edge_type),
+    arrow_directed = arrow(length = unit(10, "pt"), type = "closed")
+  ) +
+  geom_dag_label(aes(label = label, fill = node_type), size = 3.5) +
+  scale_edge_colour_manual(
+    name = "Edge Type",
+    values = c(causal = "blue", other = "gray50")
+  ) +
+  scale_edge_width_manual(
+    name = "Edge Type",
+    values = c(causal = 1.5, other = 0.8)
+  ) +
+  scale_fill_manual(
+    name = "Node Type",
+    values = c(
+      exposure = "lightblue",
+      mediator = "yellow",
+      outcome = "salmon",
+      confounder = "lightgray"
+    )
+  ) +
+  theme_dag() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical"
+  )
+
+save_files(
+  save_object = dag_landmark_plot,
+  filename = "dag_landmark",
+  directory = here::here(),
+  subD = "files/Directed Acyclic Graphs/DAG Landmark"
+)
+
+```
+
+```{r}
+#| label: dag_landmark
+#| message: false 
+#| warning: false
+#| fig.height: 7
+#| fig.width: 7
+#| fig-cap: >
+#|  **Figure X. Landmark Analysis DAG: Dose-Survival Relationship Conditional on Surviving to Dose 2**
+#|  This DAG represents the causal structure for landmark analysis, where the cohort is restricted to patients who survived to receive ≥2 doses. By conditioning on survival to dose 2, immortal time bias is removed—patients in both dose groups (2 doses vs 3+ doses) had equal opportunity to continue treatment. DoseGroup (blue, exposure) compares patients who stopped at 2 doses versus those who continued to 3+ doses. The minimal sufficient adjustment set is {Age, Agent, ECOG, ImmuneStatus, Stage}—baseline confounders only. Surgery (yellow, mediator) is on the causal pathway (DoseGroup → Surgery → EventFreeSurvival) but is not adjusted for, preserving the total effect estimate. The blue edge represents the causal effect of interest: does continuing beyond 2 doses improve event-free survival among patients who survived to receive at least 2 doses?
+
+dag_landmark_plot
+
+
+```
+
