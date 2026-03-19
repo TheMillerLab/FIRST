@@ -2,7 +2,30 @@
 
 This repository contains analysis code for the **FIRST** project, an institutional cohort study examining real-world outcomes of frontline (including neoadjuvant) immunotherapy in high-risk cutaneous squamous cell carcinoma (CSCC).
 
+---
+
+## 🌐 Supplemental Materials and Modeling Workflows
+
+Interactive supplemental materials and generative modeling workflows are available as a companion website:
+
+https://themillerlab.github.io/FIRST/
+
+Key components include:
+
+- **Response Modeling (Generative)**  
+  https://themillerlab.github.io/FIRST/generative_response.html  
+
+- **Event-Free Survival (EFS) Modeling (Generative)**  
+  https://themillerlab.github.io/FIRST/generative_efs.html  
+
+These pages provide fully reproducible, transparent implementations of the Bayesian models used in the manuscript, including prior specification, generative assumptions, and posterior inference.
+
+---
+
+## Project Overview
+
 The overarching goals of FIRST are to:
+
 - Characterize response and survival outcomes following frontline immunotherapy  
 - Evaluate **dose–response relationships** and diminishing returns  
 - Use **Bayesian causal inference** to address confounding and treatment selection  
@@ -16,14 +39,14 @@ All analyses emphasize reproducibility, transparency, and explicit modeling assu
 
 ```text
 FIRST/
+├── docs/                  # GitHub Pages site (supplemental materials)
 ├── scripts/
 │   ├── DAGs/
 │   ├── Generative_Models/
 │   └── NLP/
 └── README.md
-```
 
----
+```
 
 ## `scripts/` Overview
 
