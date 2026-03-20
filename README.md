@@ -52,6 +52,7 @@ FIRST/
 ├── docs/                  # GitHub Pages site and supplemental materials
 ├── scripts/
 │   ├── DAGs/
+│   ├── Dose Intensity/
 │   ├── Generative_Models/
 │   └── NLP/
 └── README.md
@@ -72,6 +73,14 @@ Typical contents include:
 - sensitivity analyses around adjustment sets  
 
 These DAGs inform model design across the project and serve as an explicit record of causal assumptions.
+
+---
+
+### `scripts/Dose Intensity/`
+
+This folder includes a script whose purpse it is to:
+- Build a regimen-standardized dose-intensity covariate reflecting schedule adherence across the full delivered treatment course.
+- Build a response-truncated exposure sensitivity dataset in which only doses administered on or before sys_resp_clin_date are counted.
 
 ---
 
