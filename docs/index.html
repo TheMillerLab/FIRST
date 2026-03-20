@@ -2,11 +2,11 @@
 <html>
 <head>
   <title>FIRST Supplemental Materials</title>
-  
+
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-      max-width: 900px;
+      max-width: 960px;
       margin: 60px auto;
       padding: 0 20px;
       line-height: 1.6;
@@ -15,14 +15,15 @@
     }
 
     h1 {
-      font-size: 36px;
-      margin-bottom: 10px;
+      font-size: 38px;
+      margin-bottom: 8px;
     }
 
     h2 {
       margin-top: 40px;
       border-bottom: 2px solid #eee;
-      padding-bottom: 5px;
+      padding-bottom: 6px;
+      font-size: 24px;
     }
 
     p.subtitle {
@@ -31,19 +32,24 @@
       font-size: 18px;
     }
 
+    p {
+      font-size: 17px;
+    }
+
     ul {
-      margin-top: 20px;
+      margin-top: 18px;
+      padding-left: 22px;
     }
 
     li {
-      margin-bottom: 12px;
+      margin-bottom: 14px;
       font-size: 17px;
     }
 
     a {
       text-decoration: none;
       color: #1a73e8;
-      font-weight: 500;
+      font-weight: 600;
     }
 
     a:hover {
@@ -52,10 +58,16 @@
 
     .card {
       background: white;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      padding: 22px 24px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
       margin-top: 20px;
+    }
+
+    .section-note {
+      color: #555;
+      margin-top: 8px;
+      margin-bottom: 0;
     }
 
     .footer {
@@ -63,45 +75,114 @@
       font-size: 14px;
       color: #777;
     }
+
+    .small {
+      color: #666;
+      font-size: 15px;
+      font-weight: 400;
+    }
   </style>
 </head>
 
 <body>
 
-<h1>FIRST Study</h1>
-<p class="subtitle">
-Frontline Immunotherapy with Response-Guided Subsequent Treatment
-</p>
-
-<div class="card">
-  <p>
-    This site contains supplemental materials and generative modeling workflows 
-    supporting the FIRST study, including Bayesian response modeling and 
-    time-to-event analyses.
+  <h1>FIRST Study</h1>
+  <p class="subtitle">
+    Frontline Immunotherapy with Response-Guided Subsequent Treatment
   </p>
-</div>
 
-<h2>Supplemental Materials</h2>
+  <div class="card">
+    <p>
+      This site provides supplemental materials, model-building workflows, and
+      reproducible Bayesian analyses supporting the FIRST study, an institutional
+      cohort study of frontline immunotherapy for high-risk cutaneous squamous
+      cell carcinoma (CSCC).
+    </p>
+    <p class="section-note">
+      Materials include generative modeling workflows, prior and posterior checks,
+      convergence diagnostics, and model-specific analysis documents corresponding
+      to the primary objective response and event-free survival analyses.
+    </p>
+  </div>
 
-<div class="card">
-  <ul>
-    <li>
-      <a href="generative_response.html">Response Modeling (Generative)</a><br>
-      <span style="color:#666;">Bayesian modeling of response probability across dose exposure.</span>
-    </li>
+  <h2>Core Workflows</h2>
 
-    <li>
-      <a href="generative_efs.html">EFS Modeling (Generative)</a><br>
-      <span style="color:#666;">Time-to-event modeling and prior predictive simulation for event-free survival.</span>
-    </li>
-  </ul>
-</div>
+  <div class="card">
+    <ul>
+      <li>
+        <a href="generative_response.html">Response Modeling Workflow</a><br>
+        <span class="small">
+          Generative Bayesian modeling workflow for objective response, including
+          prior specification, simulation-based validation, posterior predictive
+          checks, and dose-response model development.
+        </span>
+      </li>
 
-<div class="footer">
-  <p>
-    Miller Lab · Massachusetts General Hospital / Harvard Medical School
-  </p>
-</div>
+      <li>
+        <a href="generative_efs.html">Event-Free Survival Workflow</a><br>
+        <span class="small">
+          Generative workflow for landmark event-free survival modeling, including
+          prior predictive simulation, Weibull survival modeling, and sensitivity analyses.
+        </span>
+      </li>
+    </ul>
+  </div>
+
+  <h2>Model-Specific Analyses</h2>
+
+  <div class="card">
+    <ul>
+      <li>
+        <a href="modeling_orr_linear.html">ORR Model: Linear Dose Specification</a><br>
+        <span class="small">
+          Full model-specific analysis for Bayesian objective response modeling under
+          a linear dose parameterization.
+        </span>
+      </li>
+
+      <li>
+        <a href="modeling_orr_log.html">ORR Model: Log-Dose Specification</a><br>
+        <span class="small">
+          Model-specific analysis for Bayesian objective response modeling under a
+          log-dose formulation allowing diminishing returns.
+        </span>
+      </li>
+
+      <li>
+        <a href="modeling_orr_categorical.html">ORR Model: Categorical Dose Specification</a><br>
+        <span class="small">
+          Model-specific analysis for Bayesian objective response modeling using
+          threshold-based categorical dose terms.
+        </span>
+      </li>
+
+      <li>
+        <a href="modeling_efs.html">Event-Free Survival Model</a><br>
+        <span class="small">
+          Full model-specific analysis for the landmark Bayesian event-free survival model
+          and associated sensitivity analyses.
+        </span>
+      </li>
+    </ul>
+  </div>
+
+  <h2>Repository</h2>
+
+  <div class="card">
+    <p>
+      Source code for the FIRST project, including DAG construction, NLP workflows,
+      and Bayesian modeling scripts, is available in the GitHub repository:
+    </p>
+    <p>
+      <a href="https://github.com/TheMillerLab/FIRST">github.com/TheMillerLab/FIRST</a>
+    </p>
+  </div>
+
+  <div class="footer">
+    <p>
+      Miller Lab · Massachusetts General Hospital / Harvard Medical School
+    </p>
+  </div>
 
 </body>
 </html>
