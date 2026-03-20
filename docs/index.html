@@ -1,188 +1,478 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FIRST Supplemental Materials</title>
 
   <style>
+    :root {
+      --bg-top: #f5f8fc;
+      --bg-bottom: #ffffff;
+      --text: #1f2328;
+      --muted: #5f6b7a;
+      --line: #e6ebf2;
+      --card-bg: rgba(255, 255, 255, 0.88);
+      --card-border: rgba(255, 255, 255, 0.65);
+      --shadow: 0 10px 30px rgba(22, 34, 51, 0.08);
+      --shadow-hover: 0 14px 36px rgba(22, 34, 51, 0.12);
+      --accent: #1a73e8;
+      --accent-soft: #eef4ff;
+      --accent-2: #0f5cc0;
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
+      margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-      max-width: 960px;
-      margin: 60px auto;
-      padding: 0 20px;
-      line-height: 1.6;
-      color: #222;
-      background-color: #fafafa;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top center, rgba(26, 115, 232, 0.07), transparent 35%),
+        linear-gradient(to bottom, var(--bg-top), var(--bg-bottom));
+      line-height: 1.68;
     }
 
-    h1 {
-      font-size: 38px;
-      margin-bottom: 8px;
+    .page {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 56px 24px 72px;
     }
 
-    h2 {
-      margin-top: 40px;
-      border-bottom: 2px solid #eee;
-      padding-bottom: 6px;
-      font-size: 24px;
+    .header {
+      text-align: center;
+      margin-bottom: 42px;
     }
 
-    p.subtitle {
-      color: #555;
-      margin-top: 0;
+    .eyebrow {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 7px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      font-size: clamp(42px, 6vw, 64px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+      margin: 0 0 14px;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      font-size: clamp(18px, 2.1vw, 24px);
+      color: var(--muted);
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .header::after {
+      content: "";
+      display: block;
+      width: 72px;
+      height: 4px;
+      margin: 24px auto 0;
+      border-radius: 999px;
+      background: linear-gradient(to right, var(--accent), #6aa8ff);
+    }
+
+    .hero-card,
+    .section-card,
+    .repo-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      transition: transform 0.22s ease, box-shadow 0.22s ease;
+    }
+
+    .hero-card:hover,
+    .section-card:hover,
+    .repo-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-hover);
+    }
+
+    .hero-card {
+      padding: 30px 32px;
+      margin-bottom: 54px;
+    }
+
+    .hero-card p {
+      margin: 0 0 16px;
       font-size: 18px;
     }
 
-    p {
-      font-size: 17px;
+    .hero-card p:last-child {
+      margin-bottom: 0;
+      color: var(--muted);
     }
 
-    ul {
-      margin-top: 18px;
-      padding-left: 22px;
+    .section {
+      margin-top: 12px;
+      margin-bottom: 42px;
     }
 
-    li {
-      margin-bottom: 14px;
-      font-size: 17px;
+    .section h2 {
+      font-size: clamp(28px, 3vw, 34px);
+      letter-spacing: -0.03em;
+      margin: 0;
     }
 
-    a {
+    .section-header {
+      margin-bottom: 18px;
+    }
+
+    .section-subtitle {
+      color: var(--muted);
+      font-size: 16px;
+      margin-top: 10px;
+      max-width: 800px;
+    }
+
+    .section-divider {
+      height: 1px;
+      background: var(--line);
+      margin-top: 14px;
+    }
+
+    .section-card {
+      padding: 26px 28px;
+    }
+
+    .link-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .link-tile {
+      display: block;
       text-decoration: none;
-      color: #1a73e8;
-      font-weight: 600;
+      color: inherit;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #edf1f6;
+      border-radius: 14px;
+      padding: 18px 18px 16px;
+      transition:
+        transform 0.18s ease,
+        box-shadow 0.18s ease,
+        border-color 0.18s ease,
+        background 0.18s ease;
+      min-height: 150px;
     }
 
-    a:hover {
+    .link-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(26, 115, 232, 0.08);
+      border-color: #d7e6ff;
+      background: #ffffff;
+    }
+
+    .tile-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .tile-title {
+      font-size: 19px;
+      line-height: 1.25;
+      font-weight: 700;
+      color: var(--accent-2);
+      margin: 0;
+    }
+
+    .tile-arrow {
+      flex: 0 0 auto;
+      font-size: 18px;
+      color: var(--accent);
+      opacity: 0.85;
+    }
+
+    .tile-copy {
+      font-size: 15px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+
+    .badge.generative {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .badge.model {
+      color: #7a4cc2;
+      background: #f3ecff;
+    }
+
+    .badge.primary {
+      color: #0f8a5f;
+      background: #eafaf3;
+    }
+
+    .repo-card {
+      padding: 24px 28px;
+      margin-top: 6px;
+    }
+
+    .repo-card p {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+
+    .repo-link {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent-2);
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    .repo-link:hover {
       text-decoration: underline;
     }
 
-    .card {
-      background: white;
-      padding: 22px 24px;
-      border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-      margin-top: 20px;
-    }
-
-    .section-note {
-      color: #555;
-      margin-top: 8px;
-      margin-bottom: 0;
-    }
-
     .footer {
-      margin-top: 60px;
+      margin-top: 64px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      text-align: center;
+      color: #7a8190;
       font-size: 14px;
-      color: #777;
     }
 
-    .small {
-      color: #666;
-      font-size: 15px;
-      font-weight: 400;
+    @media (max-width: 860px) {
+      .page {
+        padding: 44px 18px 60px;
+      }
+
+      .hero-card,
+      .section-card,
+      .repo-card {
+        padding: 22px 20px;
+      }
+
+      .link-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tile-title {
+        font-size: 18px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .hero-card,
+      .section-card,
+      .repo-card,
+      .link-tile {
+        transition: none;
+      }
     }
   </style>
 </head>
 
 <body>
+  <main class="page">
 
-  <h1>FIRST Study</h1>
-  <p class="subtitle">
-    Frontline Immunotherapy with Response-Guided Subsequent Treatment
-  </p>
+    <header class="header">
+      <div class="eyebrow">Supplemental Materials</div>
+      <h1>FIRST Study</h1>
+      <p class="subtitle">
+        Frontline Immunotherapy with Response-Guided Subsequent Treatment
+      </p>
+    </header>
 
-  <div class="card">
-    <p>
-      This site provides supplemental materials, model-building workflows, and
-      reproducible Bayesian analyses supporting the FIRST study, an institutional
-      cohort study of frontline immunotherapy for high-risk cutaneous squamous
-      cell carcinoma (CSCC).
-    </p>
-    <p class="section-note">
-      Materials include generative modeling workflows, prior and posterior checks,
-      convergence diagnostics, and model-specific analysis documents corresponding
-      to the primary objective response and event-free survival analyses.
-    </p>
-  </div>
+    <section class="hero-card">
+      <p>
+        This site provides supplemental materials, model-building workflows, and reproducible Bayesian
+        analyses supporting the FIRST study, an institutional cohort study of frontline immunotherapy
+        for high-risk cutaneous squamous cell carcinoma (CSCC).
+      </p>
+      <p>
+        Materials include generative modeling workflows, prior and posterior checks, convergence
+        diagnostics, and model-specific analysis documents corresponding to the primary objective
+        response and event-free survival analyses.
+      </p>
+    </section>
 
-  <h2>Core Workflows</h2>
+    <section class="section">
+      <div class="section-header">
+        <h2>Core Workflows</h2>
+        <div class="section-subtitle">
+          Foundational Quarto documents describing model construction, prior specification,
+          simulation-based validation, and diagnostic evaluation.
+        </div>
+        <div class="section-divider"></div>
+      </div>
 
-  <div class="card">
-    <ul>
-      <li>
-        <a href="generative_response.html">Response Modeling Workflow</a><br>
-        <span class="small">
-          Generative Bayesian modeling workflow for objective response, including
-          prior specification, simulation-based validation, posterior predictive
-          checks, and dose-response model development.
-        </span>
-      </li>
+      <div class="section-card">
+        <div class="link-grid">
+          <a class="link-tile" href="generative_response.html">
+            <div class="badge-row">
+              <span class="badge generative">Generative</span>
+              <span class="badge primary">Response</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">Response Modeling Workflow</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Generative Bayesian modeling for objective response, including prior specification,
+              simulation-based validation, posterior predictive checks, and dose-response model development.
+            </p>
+          </a>
 
-      <li>
-        <a href="generative_efs.html">Event-Free Survival Workflow</a><br>
-        <span class="small">
-          Generative workflow for landmark event-free survival modeling, including
-          prior predictive simulation, Weibull survival modeling, and sensitivity analyses.
-        </span>
-      </li>
-    </ul>
-  </div>
+          <a class="link-tile" href="generative_efs.html">
+            <div class="badge-row">
+              <span class="badge generative">Generative</span>
+              <span class="badge primary">Survival</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">Event-Free Survival Workflow</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Generative workflow for landmark event-free survival modeling, including prior predictive
+              simulation, Weibull survival modeling, and sensitivity analyses.
+            </p>
+          </a>
+        </div>
+      </div>
+    </section>
 
-  <h2>Model-Specific Analyses</h2>
+    <section class="section">
+      <div class="section-header">
+        <h2>Model-Specific Analyses</h2>
+        <div class="section-subtitle">
+          Analysis-specific documents containing full code, diagnostics, posterior outputs,
+          and figure-generation workflows for each primary model specification.
+        </div>
+        <div class="section-divider"></div>
+      </div>
 
-  <div class="card">
-    <ul>
-      <li>
-        <a href="modeling_orr_linear.html">ORR Model: Linear Dose Specification</a><br>
-        <span class="small">
-          Full model-specific analysis for Bayesian objective response modeling under
-          a linear dose parameterization.
-        </span>
-      </li>
+      <div class="section-card">
+        <div class="link-grid">
+          <a class="link-tile" href="modeling_orr_linear.html">
+            <div class="badge-row">
+              <span class="badge model">Model-specific</span>
+              <span class="badge primary">ORR</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">ORR Model: Linear Dose Specification</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Full analysis for Bayesian objective response modeling under a linear dose parameterization.
+            </p>
+          </a>
 
-      <li>
-        <a href="modeling_orr_log.html">ORR Model: Log-Dose Specification</a><br>
-        <span class="small">
-          Model-specific analysis for Bayesian objective response modeling under a
-          log-dose formulation allowing diminishing returns.
-        </span>
-      </li>
+          <a class="link-tile" href="modeling_orr_log.html">
+            <div class="badge-row">
+              <span class="badge model">Model-specific</span>
+              <span class="badge primary">ORR</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">ORR Model: Log-Dose Specification</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Model-specific analysis for objective response under a log-dose formulation allowing diminishing returns.
+            </p>
+          </a>
 
-      <li>
-        <a href="modeling_orr_categorical.html">ORR Model: Categorical Dose Specification</a><br>
-        <span class="small">
-          Model-specific analysis for Bayesian objective response modeling using
-          threshold-based categorical dose terms.
-        </span>
-      </li>
+          <a class="link-tile" href="modeling_orr_categorical.html">
+            <div class="badge-row">
+              <span class="badge model">Model-specific</span>
+              <span class="badge primary">ORR</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">ORR Model: Categorical Dose Specification</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Threshold-based Bayesian objective response modeling using categorical dose indicators.
+            </p>
+          </a>
 
-      <li>
-        <a href="modeling_efs.html">Event-Free Survival Model</a><br>
-        <span class="small">
-          Full model-specific analysis for the landmark Bayesian event-free survival model
-          and associated sensitivity analyses.
-        </span>
-      </li>
-    </ul>
-  </div>
+          <a class="link-tile" href="modeling_efs.html">
+            <div class="badge-row">
+              <span class="badge model">Model-specific</span>
+              <span class="badge primary">EFS</span>
+            </div>
+            <div class="tile-top">
+              <h3 class="tile-title">Event-Free Survival Model</h3>
+              <span class="tile-arrow">↗</span>
+            </div>
+            <p class="tile-copy">
+              Full model-specific analysis for the landmark Bayesian event-free survival model and associated sensitivities.
+            </p>
+          </a>
+        </div>
+      </div>
+    </section>
 
-  <h2>Repository</h2>
+    <section class="section">
+      <div class="section-header">
+        <h2>Repository</h2>
+        <div class="section-divider"></div>
+      </div>
 
-  <div class="card">
-    <p>
-      Source code for the FIRST project, including DAG construction, NLP workflows,
-      and Bayesian modeling scripts, is available in the GitHub repository:
-    </p>
-    <p>
-      <a href="https://github.com/TheMillerLab/FIRST">github.com/TheMillerLab/FIRST</a>
-    </p>
-  </div>
+      <div class="repo-card">
+        <p>
+          Source code for the FIRST project, including DAG construction, NLP workflows,
+          and Bayesian modeling scripts, is available in the GitHub repository:
+        </p>
+        <a class="repo-link" href="https://github.com/TheMillerLab/FIRST">
+          github.com/TheMillerLab/FIRST
+        </a>
+      </div>
+    </section>
 
-  <div class="footer">
-    <p>
+    <footer class="footer">
       Miller Lab · Massachusetts General Hospital / Harvard Medical School
-    </p>
-  </div>
+    </footer>
 
+  </main>
 </body>
 </html>
